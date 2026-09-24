@@ -1,6 +1,6 @@
 # Universal Feature Learning Dynamics Revealed by Self-Averaging Observables
 
-Code accompanying the Master's thesis
+Code accompanying the Master's thesis (For the sake of clarity, the repository has been reorganised using Claude.)
 
 > **Moritz Rautenberg**, *Universal Feature Learning Dynamics Revealed by Self-Averaging Observables*,
 > Master's thesis, Faculty of Physics, Ludwig-Maximilians-Universität München, 2026.

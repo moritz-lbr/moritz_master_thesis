@@ -8,7 +8,10 @@ Canvas: 1 unit = 0.1 in in x and y; the output PNG has exactly the format of
 the original figure (1672 x 941 px).
 """
 
+import os
+
 import matplotlib
+OUT_DIR = os.path.dirname(os.path.abspath(__file__))  # figures are saved next to this script
 matplotlib.use("Agg")
 
 import numpy as np
@@ -228,7 +231,7 @@ ax.text(91.0, 15.3,
         r"$\mathit{every}$ hidden unit.",
         fontsize=18, ha="center", va="center")
 
-fig.savefig("explanation_figures/hidden_representations.png",
+fig.savefig(os.path.join(OUT_DIR, "hidden_representations.png"),
             dpi=DPI * SCALE, facecolor="white")
 
 print("saved")

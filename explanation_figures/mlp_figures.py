@@ -13,7 +13,10 @@ LaTeX document does not change any layout.
 
 Requires: matplotlib, numpy.
 """
+import os
+
 import matplotlib
+OUT_DIR = os.path.dirname(os.path.abspath(__file__))  # figures are saved next to this script
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
@@ -131,5 +134,5 @@ def draw(highlight=None, out='figure.png'):
 
 
 if __name__ == '__main__':
-    draw(highlight=None, out='explanation_figures/MLP_z.png')
-    draw(highlight=1, out='explanation_figures/MLP_z_neuron_connections.png')   # second hidden node
+    draw(highlight=None, out=os.path.join(OUT_DIR, 'MLP_z.png'))
+    draw(highlight=1, out=os.path.join(OUT_DIR, 'MLP_z_neuron_connections.png'))   # second hidden node

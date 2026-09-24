@@ -1,0 +1,12 @@
+defaults:
+  - master_config@_master
+  - _self_
+simulation_parameters:
+  network:
+    activations_per_layer: ${_master.simulation_parameters.network.activations_per_layer}
+    nodes_per_layer:
+      Dense_0: 2896
+      Dense_1: 10
+    param_scheme: ${_master.simulation_parameters.network.param_scheme}
+    base_layer_widths: ${_master.simulation_parameters.network.base_layer_widths}
+  training: ${_master.simulation_parameters.training}

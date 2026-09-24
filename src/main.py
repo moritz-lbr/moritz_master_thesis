@@ -4,7 +4,6 @@ from collections import OrderedDict
 from pathlib import Path
 import yaml
 from tqdm import tqdm
-import pynvml
 # from jax import config
 # config.update("jax_enable_x64", True)
 
@@ -123,13 +122,21 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
         yaml.safe_dump(simulation_config, f, sort_keys=False)
 
     print(f"→ results saved to {run_dir}")
+    print_gpu_info()
 
-    pynvml.nvmlInit()
-    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
 
-    name = pynvml.nvmlDeviceGetName(handle)
-    mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-    cap = pynvml.nvmlDeviceGetCudaComputeCapability(handle)
+def print_gpu_info() -> None:
+    """Print GPU details when an NVIDIA device is available (no-op on CPU-only machines)."""
+    try:
+        import pynvml
+
+        pynvml.nvmlInit()
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        name = pynvml.nvmlDeviceGetName(handle)
+        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        cap = pynvml.nvmlDeviceGetCudaComputeCapability(handle)
+    except Exception:
+        return
 
     print("Device name:", name)
     print("Compute capability:", cap)

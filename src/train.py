@@ -13,20 +13,8 @@ from utils import (
     mse_loss,
     cross_entropy_loss,
     create_state,
-    load_teacher_dataset,
-    load_teacher_2048x1_dataset,
-    load_all_cifar10_data,
-    load_mnist,
-    load_emnist_byclass,
-    load_svhn,
-    load_winequality,
-    load_drybean,
-    load_classification_dataset,
-    load_california_housing_prices,
-    load_ct_slice_localization,
-    load_yearpredictionmsd,
-    resolve_dataset_path,
 )
+from data import load_dataset
 
 
 def make_train_step(loss_fn):
@@ -123,205 +111,15 @@ def append_first_layer_terms(root, term_matrix, step, sep="/", cast_dtype=None):
         cast_dtype=cast_dtype,
     )
 
-def _is_cifar10_dataset(dataset_path: Path) -> bool:
-    return (
-        dataset_path.is_dir()
-        and (dataset_path / "data_batch_1").is_file()
-        and (dataset_path / "test_batch").is_file()
-    )
-
-def _is_mnist_dataset(dataset_path: Path) -> bool:
-    return (
-        dataset_path.is_dir()
-        and (dataset_path / "train-images-idx3-ubyte").is_file()
-        and (dataset_path / "train-labels-idx1-ubyte").is_file()
-        and (dataset_path / "t10k-images-idx3-ubyte").is_file()
-        and (dataset_path / "t10k-labels-idx1-ubyte").is_file()
-    )
-
-def _is_emnist_byclass_dataset(dataset_path: Path) -> bool:
-    base_dir = dataset_path / "byclass" if (dataset_path / "byclass").is_dir() else dataset_path
-    return (
-        base_dir.is_dir()
-        and (base_dir / "emnist-byclass-train-images-idx3-ubyte").is_file()
-        and (base_dir / "emnist-byclass-train-labels-idx1-ubyte").is_file()
-        and (base_dir / "emnist-byclass-test-images-idx3-ubyte").is_file()
-        and (base_dir / "emnist-byclass-test-labels-idx1-ubyte").is_file()
-    )
-
-def _is_svhn_dataset(dataset_path: Path) -> bool:
-    return (
-        dataset_path.is_dir()
-        and (dataset_path / "train_32x32.mat").is_file()
-        and (dataset_path / "test_32x32.mat").is_file()
-    )
-
-def _is_winequality_dataset(dataset_path: Path) -> bool:
-    if dataset_path.is_file():
-        return dataset_path.suffix.lower() == ".csv" and dataset_path.name.startswith("winequality-")
-    return (
-        dataset_path.is_dir()
-        and any(
-            (dataset_path / filename).is_file()
-            for filename in ("winequality-red.csv", "winequality-white.csv")
-        )
-    )
-
-def _is_drybean_dataset(dataset_path: Path) -> bool:
-    if dataset_path.is_file():
-        return dataset_path.suffix.lower() == ".arff" and dataset_path.name == "Dry_Bean_Dataset.arff"
-    return dataset_path.is_dir() and (dataset_path / "Dry_Bean_Dataset.arff").is_file()
-
-def _is_classification_dataset(dataset_path: Path) -> bool:
-    data_path = dataset_path if dataset_path.is_file() else dataset_path / "data.npz"
-    if not data_path.is_file():
-        return False
-    with np.load(data_path) as data:
-        return {"inputs", "outputs", "train_idx", "test_idx"} <= set(data.files)
-
-def _is_yearpredictionmsd_dataset(dataset_path: Path) -> bool:
-    if dataset_path.is_file():
-        return dataset_path.name == "YearPredictionMSD.txt"
-    return dataset_path.is_dir() and (dataset_path / "YearPredictionMSD.txt").is_file()
-
-def _is_california_housing_prices_dataset(dataset_path: Path) -> bool:
-    csv_path = dataset_path if dataset_path.is_file() else dataset_path / "housing.csv"
-    if not csv_path.is_file():
-        return False
-
-    required_columns = {
-        "longitude",
-        "latitude",
-        "housing_median_age",
-        "total_rooms",
-        "total_bedrooms",
-        "population",
-        "households",
-        "median_income",
-        "median_house_value",
-        "ocean_proximity",
-    }
-    with csv_path.open("r", encoding="utf-8") as file:
-        header = file.readline().strip().split(",")
-    return required_columns <= set(header)
-
-def _is_ct_slice_localization_dataset(dataset_path: Path) -> bool:
-    csv_path = dataset_path if dataset_path.is_file() else dataset_path / "slice_localization_data.csv"
-    if not csv_path.is_file():
-        return False
-
-    with csv_path.open("r", encoding="utf-8") as file:
-        header = file.readline().strip().split(",")
-    return (
-        len(header) == 386
-        and header[0] == "patientId"
-        and header[1] == "value0"
-        and header[-2] == "value383"
-        and header[-1] == "reference"
-    )
-
-def _is_teacher_2048x1_dataset(dataset_path: Path) -> bool:
-    data_path = dataset_path if dataset_path.is_file() else dataset_path / "data.npz"
-    return (
-        data_path.is_file()
-        and data_path.name == "data.npz"
-        and data_path.parent.name == "2048x1"
-    )
-
-
 def run_once(
     cfg,
     run_dir: Path,
     progress: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
     
-    test_split = float(cfg.test_split)
-
-    def compute_split_counts(total: int) -> tuple[int, int]:
-        if total <= 1:
-            return total, 0
-        n_test = int(round(total * test_split))
-        n_test = max(1, min(total - 1, n_test))
-        n_train = total - n_test
-        return n_train, n_test
-
     rng_source = np.random.default_rng()
-    dataset_path = resolve_dataset_path(cfg.task)
-
-    if _is_yearpredictionmsd_dataset(dataset_path):
-        xtr_np, ytr_np, xte, yte = load_yearpredictionmsd(dataset_path)
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
-        test_split = float(xte.shape[0] / total_samples)
-    elif _is_california_housing_prices_dataset(dataset_path):
-        xtr_np, ytr_np, xte, yte = load_california_housing_prices(
-            dataset_path,
-            test_split=test_split,
-            seed=0,
-        )
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
-    elif _is_ct_slice_localization_dataset(dataset_path):
-        xtr_np, ytr_np, xte, yte = load_ct_slice_localization(
-            dataset_path,
-            test_split=test_split,
-            seed=0,
-        )
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
-    elif _is_drybean_dataset(dataset_path):
-        xtr_np, ytr_np, xte, yte = load_drybean(
-            dataset_path,
-            test_split=test_split,
-            seed=0,
-            one_hot=True,
-        )
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
-    elif _is_classification_dataset(dataset_path):
-        xtr_np, ytr_np, xte, yte = load_classification_dataset(dataset_path, one_hot=True)
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
-        test_split = float(xte.shape[0] / total_samples)
-    elif _is_winequality_dataset(dataset_path):
-        xtr_np, ytr_np, xte, yte = load_winequality(
-            dataset_path,
-            test_split=test_split,
-            seed=0,
-            one_hot=True,
-        )
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
-    elif _is_mnist_dataset(dataset_path):
-        xtr_np, ytr_np, xte, yte = load_mnist(dataset_path)
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
-    elif _is_emnist_byclass_dataset(dataset_path):
-        xtr_np, ytr_np, xte, yte = load_emnist_byclass(dataset_path)
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
-    elif _is_svhn_dataset(dataset_path):
-        xtr_np, ytr_np, xte, yte = load_svhn(dataset_path)
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
-    elif _is_cifar10_dataset(dataset_path):
-        xtr_np, ytr_np, xte, yte = load_all_cifar10_data(dataset_path)
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
-    elif _is_teacher_2048x1_dataset(dataset_path):
-        xtr_np, ytr_np, xte, yte = load_teacher_2048x1_dataset(
-            dataset_path,
-            test_split=test_split,
-            seed=0,
-        )
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
-    else:
-        inputs, targets = load_teacher_dataset(dataset_path)
-        total_samples = int(inputs.shape[0])
-        n_train, n_test = compute_split_counts(total_samples)
-        permutation = rng_source.permutation(total_samples)
-        test_idx = permutation[:n_test]
-        train_idx = permutation[n_test:]
-        if train_idx.size == 0:
-            train_idx = permutation[:-1]
-            test_idx = permutation[-1:]
-        xtr_np = inputs[train_idx]
-        ytr_np = targets[train_idx]
-        xte = inputs[test_idx]
-        yte = targets[test_idx]
-        if set(train_idx) & set(test_idx):
-            raise ValueError("Train and test sets overlap.")
-  
+    xtr_np, ytr_np, xte, yte, test_split = load_dataset(cfg.task, cfg.test_split, rng_source)
+    total_samples = int(xtr_np.shape[0] + xte.shape[0])
 
     xtr_np = np.asarray(xtr_np, dtype=np.float32)
     ytr_np = np.asarray(ytr_np, dtype=np.float32)

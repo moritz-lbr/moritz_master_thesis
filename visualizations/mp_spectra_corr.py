@@ -1,4 +1,23 @@
 #!/usr/bin/env python3
+"""Detached eigenvalues and low-rank reconstruction (thesis Figs. 5.9 - 5.12).
+
+Builds on the caches of ``analyze_superposition.py`` (run it first on the same job).
+The eigenvalue spectrum of the superposition matrix is compared with a decorrelated
+null spectrum obtained by independently permuting the entries of every input column of
+W (``--replicates`` permutations). Eigenvalues above the null spectrum are "detached"
+(k_det of them). The model at its best-test-loss checkpoint is then reconstructed from
+the leading k = r * k_det principal components and its test loss is evaluated.
+
+Outputs (in <output-dir>/<task>/<job>/mp_cor_eigenvalue_spectra_Dense_0/):
+    eigenvalues_step_0.png                                      Figs. 5.9/5.10 top
+    eigenvalues_best_test_loss_Dense_0.png                      Figs. 5.9/5.10 bottom
+    best_test_loss_vs_detached_mode_fraction_Dense_0.png        Fig. 5.11
+    best_test_loss_vs_detached_mode_fraction_all_widths_Dense_0.png   Fig. 5.12
+    (plus per-step spectra, detached-count and time-resolved reconstruction plots)
+
+Usage:
+    python visualizations/mp_spectra_corr.py --input-dir <job-dir>
+"""
 from __future__ import annotations
 
 import argparse
@@ -20,7 +39,7 @@ from matplotlib.ticker import FixedLocator, FuncFormatter, NullFormatter
 import numpy as np
 
 import analyze_superposition as sup
-import plot_superposition as ps
+import superposition_utils as ps
 
 
 LAYER = sup.LAYER
@@ -2027,7 +2046,7 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--input-dir", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, default=Path("figures_analyze_superposition"))
+    parser.add_argument("--output-dir", type=Path, default=Path("figures/superposition"))
     parser.add_argument("--replicates", type=int, default=5)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--dpi", type=int, default=150)

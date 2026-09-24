@@ -1,0 +1,25 @@
+# Quickstart CIFAR-10, SP: small version of experiments/cifar10/sp
+#
+# Settings shared by all widths of this experiment. Every <scheme>_config<N>.yaml in this
+# folder inherits from this file via Hydra (`defaults: [master_config@_master]`) and only
+# sets the hidden-layer width (and, where needed, overrides training settings).
+simulation_parameters:
+  network:
+    base_layer_widths:        # base width n_0 of the muP rescaling (ignored under SP)
+      Dense_0: 128
+      Dense_1: 10
+    activations_per_layer:
+      Dense_0: relu
+      Dense_1: identity
+    param_scheme: standard    # 'muP' or 'standard' (SP), see src/param_schemes.py
+  training:
+    lr: 0.005
+    wd: 0.0
+    task: datasets/cifar-10-batches-py   # dataset folder, see datasets/download.py
+    test_split: 0.2     # only used for datasets without a predefined test split
+    batch_size: 512
+    batch_seed: 0       # Seed that fixes the order of the mini-batches (identical for all widths). Use 'random' to shuffle randomly at each epoch
+    epochs: 8          # Number of full passes through the training data
+    save_loss_frequency: 20  # Losses and weight snapshots are saved every save_loss_frequency SGD steps ('epoch' = once per epoch)
+    weight_monitoring: True   # Save weight snapshots to weights.zarr (needed for all weight-based analyses)
+    loss_type: "cross_entropy"   # 'cross_entropy' or 'mse'

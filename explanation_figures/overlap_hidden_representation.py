@@ -9,7 +9,10 @@ Canvas: 1 unit = 0.1 in in x and y; the output PNG has exactly the format of
 the original figure (2149 x 731 px).
 """
 
+import os
+
 import matplotlib
+OUT_DIR = os.path.dirname(os.path.abspath(__file__))  # figures are saved next to this script
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
@@ -245,6 +248,6 @@ ax.text(255.4, 50.7,
         r"$h(\boldsymbol{x}) = \sum_{i=1}^{d} \boldsymbol{w}_i x_i$",
         fontsize=FS_FORM, ha="center", va="center")
 
-fig.savefig("explanation_figures/Overlap_hidden_representations.png",
+fig.savefig(os.path.join(OUT_DIR, "Overlap_hidden_representations.png"),
             dpi=DPI * SCALE, facecolor="white")
 print("saved")

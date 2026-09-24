@@ -1,4 +1,23 @@
 #!/usr/bin/env python3
+"""Superposition-matrix analysis of the first-layer weights (thesis Section 5.3).
+
+For every run of a job directory, the superposition matrix C = W^T W / n of the
+Dense_0 kernel W (n x d) is computed at logarithmically spaced saved training steps.
+Its eigenvalue spectrum is cached so that ``mp_spectra_corr.py`` can build on it.
+
+Outputs (in <output-dir>/<task>/<job>/):
+    analysis_cache_Dense_0/                         cached spectra (input of mp_spectra_corr.py)
+    <run>/Dense_0/input_space_frames/               C and three reference-pixel overlap maps
+                                                    per training step (Figs. 5.7, 5.8)
+    <run>/Dense_0/best_test_loss_input_space*/      same at the best-test-loss step
+                                                    (--best-input-space; Figs. 5.7, 5.8 bottom)
+    frobenius_norm_*.png, eigenvalue_spectra_*/     supplementary overview plots
+    spectral_reconstruction_Dense_0/                test loss of models rebuilt from the top
+                                                    singular modes of W (supplementary)
+
+Usage:
+    python visualizations/analyze_superposition.py --input-dir <job-dir> --best-input-space
+"""
 from __future__ import annotations
 
 import argparse
@@ -19,7 +38,7 @@ from matplotlib.patches import Rectangle
 from matplotlib.ticker import FixedLocator, FuncFormatter
 import numpy as np
 
-import plot_superposition as ps
+import superposition_utils as ps
 
 
 LAYER = "Dense_0"
@@ -1299,7 +1318,7 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--input-dir", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, default=Path("figures_analyze_superposition"))
+    parser.add_argument("--output-dir", type=Path, default=Path("figures/superposition"))
     parser.add_argument(
         "--min-step",
         type=int,

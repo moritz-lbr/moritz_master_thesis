@@ -1,4 +1,10 @@
-"""Plot weight-update norms for Dense_0 and Dense_1."""
+"""Plot weight-update norms for Dense_0 and Dense_1 of all runs in one job directory.
+
+Alternative to ``plot_observables.py update-norms`` that additionally produces the
+deviation of every width from the widest network, the test-loss curves and the
+"breakdown times" at which the rescaled update norms leave the universal curve.
+Requires ``training_analysis/compute_metrics.py`` to have been run on the job first.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +20,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from plot_weight_update_similarity import (
+from run_utils import (
     PlotSeries,
     _build_combined_legend,
     _build_x_axis,
@@ -639,6 +645,7 @@ def plot_update_norms(
     sigma_stop: float = DEFAULT_SIGMA_STOP,
     num_sigmas: int = DEFAULT_NUM_SIGMAS,
     skip_breakdown: bool = False,
+    output_root: Path = Path("figures/update_norms"),
 ) -> None:
     _validate_window_width("delta_t_avg", delta_t_avg, minimum=1)
     _validate_window_width("delta_t_std", delta_t_std, minimum=2)
@@ -833,7 +840,7 @@ def plot_update_norms(
     fig_deviation.suptitle(deviation_title, fontsize=18)
     fig_deviation.tight_layout(rect=[0, 0.02, 1, 0.92])
 
-    output_dir = Path(f"figures_update_norm_analysis/{task_name}/{job_dir.name}")
+    output_dir = output_root / task_name / job_dir.name
     output_dir.mkdir(parents=True, exist_ok=True)
     file_stem = "update_norms_c" if compute_flag else "update_norms"
     file_path = output_dir / f"{file_stem}_dt_avg_{delta_t_avg}_dt_std_{delta_t_std}.png"
@@ -943,6 +950,12 @@ def main() -> None:
         help="Number of equidistant sigma thresholds to evaluate.",
     )
     parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("figures/update_norms"),
+        help="Root directory for the figures; they are saved in <output-dir>/<task>/<job>/.",
+    )
+    parser.add_argument(
         "--skip-breakdown",
         action="store_true",
         help="Save only the update-norm and loss figures and skip breakdown-time outputs.",
@@ -959,6 +972,7 @@ def main() -> None:
         args.sigma_stop,
         args.num_sigmas,
         args.skip_breakdown,
+        args.output_dir,
     )
 
 

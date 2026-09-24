@@ -1,9 +1,16 @@
-"""Plot test loss and update-norm observables across one or more jobs.
+"""Plot test loss and update-norm observables across one or more jobs (Figs. 5.1-5.3).
 
 This is a small replacement for the update-norm plotting workflow when only the
 loss and update-norm figures are needed.  Runs are grouped by hidden width.  If
 multiple jobs contain the same width, the mean is plotted and the across-run
 standard deviation is shown as a shaded band.  A single run is plotted raw.
+
+    # Fig. 5.1 (muP) / Fig. 5.3 top (SP): raw and rescaled layer-wise update norms
+    python visualizations/plot_observables.py update-norms --log-dirs <job-dirs> --output <png>
+    # Fig. 5.2 (muP) / Fig. 5.3 bottom (SP): test loss averaged over seeds, with zoom
+    python visualizations/plot_observables.py test-loss --log-dirs <job-dirs> --output <png>
+
+Update norms require ``training_analysis/compute_metrics.py`` to have been run first.
 """
 
 from __future__ import annotations
@@ -16,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-codex")
+os.environ.setdefault("MPLCONFIGDIR", str(Path(".cache/matplotlib").resolve()))
 
 import matplotlib
 
@@ -355,6 +362,26 @@ def _loss_defaults(parametrization: str, x_axis_kind: str) -> dict[str, tuple[fl
     }
 
 
+def _auto_loss_limits(aggregated: dict[int, AggregatedSeries]) -> dict[str, tuple[float, float]]:
+    """Derive main/zoom axis limits from the data (zoom = last 35% of the log time axis)."""
+    x_all = np.concatenate([series.x_axis for series in aggregated.values()])
+    y_all = np.concatenate([series.mean for series in aggregated.values()])
+    valid = np.isfinite(x_all) & np.isfinite(y_all) & (x_all > 0) & (y_all > 0)
+    x_all, y_all = x_all[valid], y_all[valid]
+    x_min, x_max = float(x_all.min()), float(x_all.max())
+    log_min, log_max = np.log10(x_min), np.log10(x_max)
+    zoom_start = 10 ** (log_max - 0.35 * (log_max - log_min))
+    zoom_y = y_all[x_all >= zoom_start]
+    if zoom_y.size == 0:
+        zoom_y = y_all
+    return {
+        "main_xlim": (x_min / 1.1, x_max * 1.1),
+        "zoom_xlim": (zoom_start, x_max * 1.05),
+        "main_ylim": (float(y_all.min()) / 1.02, float(y_all.max()) * 1.02),
+        "zoom_ylim": (float(zoom_y.min()) / 1.005, float(zoom_y.max()) * 1.005),
+    }
+
+
 def _axes_for_loss(legend_position: str) -> tuple[Any, Any, Any]:
     fig = plt.figure(figsize=(13.57, 4.84), dpi=100)
     if legend_position == "right":
@@ -377,7 +404,10 @@ def plot_test_loss(args: argparse.Namespace) -> None:
     aggregated = _aggregate_runs(grouped, lambda run: run.test_loss, args.x_axis)
     widths = sorted(aggregated)
     colors = _colors(parametrization, len(widths))
-    defaults = _loss_defaults(parametrization, args.x_axis)
+    if args.limits == "thesis":
+        defaults = _loss_defaults(parametrization, args.x_axis)
+    else:
+        defaults = _auto_loss_limits(aggregated)
 
     main_xlim = tuple(args.main_xlim or defaults["main_xlim"])
     zoom_xlim = tuple(args.zoom_xlim or defaults["zoom_xlim"])
@@ -632,6 +662,16 @@ def parse_args() -> argparse.Namespace:
         choices=("left", "right"),
         default="left",
         help="Place the legend to the left or right of the two panels.",
+    )
+    loss_parser.add_argument(
+        "--limits",
+        choices=("auto", "thesis"),
+        default="auto",
+        help=(
+            "Default axis limits: 'auto' derives them from the data, 'thesis' uses the "
+            "fixed limits of the CIFAR-10 figures in the thesis (Figs. 5.2, 5.3). "
+            "Explicit --main-xlim/--zoom-xlim/... always take precedence."
+        ),
     )
     loss_parser.add_argument("--main-xlim", type=float, nargs=2, default=None)
     loss_parser.add_argument("--zoom-xlim", type=float, nargs=2, default=None)

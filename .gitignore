@@ -1,0 +1,16 @@
+# pixi environments
+.pixi/
+
+# Python
+__pycache__/
+*.pyc
+
+# downloaded datasets (see datasets/download.py)
+datasets/*/
+
+# training outputs and generated figures
+experiments/**/logs/
+figures/
+
+# matplotlib cache created by the plotting scripts
+.cache/

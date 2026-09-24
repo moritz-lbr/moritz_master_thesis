@@ -1,4 +1,15 @@
-"""Script to visualize average layer activations per epoch for different model widths."""
+"""Hidden-layer activation changes across network widths (thesis Fig. 3.1).
+
+For every run of a job directory, the Dense_0 weight snapshots in ``weights.zarr`` are
+used to compute the mean absolute change of the hidden pre-activations h and
+post-activations z on the test set between consecutive saved training steps. The
+changes are plotted against the width n (log-log) together with a fitted scaling
+exponent: under SP they decay as O(n^-1/2), under muP they stay O(1).
+
+Outputs (in --output-dir):
+    <job>_dense0_activation_deltas.png   Fig. 3.1 (one panel per parametrization)
+    <job>.png                            mean |activation| per layer over training
+"""
 
 from __future__ import annotations
 
@@ -15,28 +26,14 @@ visualizations_root = Path(__file__).resolve().parent
 sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root) + "/src")
 sys.path.insert(0, str(visualizations_root))
-from utils import (
-    load_yaml_as_dict,
-    load_all_cifar10_data,
-    load_california_housing_prices,
-    load_classification_dataset,
-    load_ct_slice_localization,
-    load_drybean,
-    load_emnist_byclass,
-    load_mnist,
-    load_svhn,
-    load_teacher_2048x1_dataset,
-    load_teacher_dataset,
-    load_winequality,
-    load_yearpredictionmsd,
-    resolve_dataset_path,
-)
+from data import load_dataset
 
 _CACHE_DIR = Path(".cache/matplotlib")
 os.environ.setdefault("MPLCONFIGDIR", str(_CACHE_DIR.resolve()))
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-from plot_weight_update_similarity import (
+from run_utils import (
+    load_yaml_as_dict,
     _build_combined_legend,
     _label_from_log_path,
     _prepare_color_map,
@@ -83,128 +80,6 @@ def load_training_log(log_path: Path) -> Dict[str, object]:
         return json.load(file)
 
 
-def _is_cifar10_dataset(dataset_path: Path) -> bool:
-    return (
-        dataset_path.is_dir()
-        and (dataset_path / "data_batch_1").is_file()
-        and (dataset_path / "test_batch").is_file()
-    )
-
-
-def _is_mnist_dataset(dataset_path: Path) -> bool:
-    return (
-        dataset_path.is_dir()
-        and (dataset_path / "train-images-idx3-ubyte").is_file()
-        and (dataset_path / "train-labels-idx1-ubyte").is_file()
-        and (dataset_path / "t10k-images-idx3-ubyte").is_file()
-        and (dataset_path / "t10k-labels-idx1-ubyte").is_file()
-    )
-
-
-def _is_emnist_byclass_dataset(dataset_path: Path) -> bool:
-    base_dir = dataset_path / "byclass" if (dataset_path / "byclass").is_dir() else dataset_path
-    return (
-        base_dir.is_dir()
-        and (base_dir / "emnist-byclass-train-images-idx3-ubyte").is_file()
-        and (base_dir / "emnist-byclass-train-labels-idx1-ubyte").is_file()
-        and (base_dir / "emnist-byclass-test-images-idx3-ubyte").is_file()
-        and (base_dir / "emnist-byclass-test-labels-idx1-ubyte").is_file()
-    )
-
-
-def _is_svhn_dataset(dataset_path: Path) -> bool:
-    return (
-        dataset_path.is_dir()
-        and (dataset_path / "train_32x32.mat").is_file()
-        and (dataset_path / "test_32x32.mat").is_file()
-    )
-
-
-def _is_winequality_dataset(dataset_path: Path) -> bool:
-    if dataset_path.is_file():
-        return dataset_path.suffix.lower() == ".csv" and dataset_path.name.startswith("winequality-")
-    return (
-        dataset_path.is_dir()
-        and any(
-            (dataset_path / filename).is_file()
-            for filename in ("winequality-red.csv", "winequality-white.csv")
-        )
-    )
-
-
-def _is_drybean_dataset(dataset_path: Path) -> bool:
-    if dataset_path.is_file():
-        return dataset_path.suffix.lower() == ".arff" and dataset_path.name == "Dry_Bean_Dataset.arff"
-    return dataset_path.is_dir() and (dataset_path / "Dry_Bean_Dataset.arff").is_file()
-
-
-def _is_classification_dataset(dataset_path: Path) -> bool:
-    data_path = dataset_path if dataset_path.is_file() else dataset_path / "data.npz"
-    if not data_path.is_file():
-        return False
-    with np.load(data_path) as data:
-        return {"inputs", "outputs", "train_idx", "test_idx"} <= set(data.files)
-
-
-def _is_yearpredictionmsd_dataset(dataset_path: Path) -> bool:
-    if dataset_path.is_file():
-        return dataset_path.name == "YearPredictionMSD.txt"
-    return dataset_path.is_dir() and (dataset_path / "YearPredictionMSD.txt").is_file()
-
-
-def _is_california_housing_prices_dataset(dataset_path: Path) -> bool:
-    csv_path = dataset_path if dataset_path.is_file() else dataset_path / "housing.csv"
-    if not csv_path.is_file():
-        return False
-    required_columns = {
-        "longitude",
-        "latitude",
-        "housing_median_age",
-        "total_rooms",
-        "total_bedrooms",
-        "population",
-        "households",
-        "median_income",
-        "median_house_value",
-        "ocean_proximity",
-    }
-    with csv_path.open("r", encoding="utf-8") as file:
-        header = file.readline().strip().split(",")
-    return required_columns <= set(header)
-
-
-def _is_ct_slice_localization_dataset(dataset_path: Path) -> bool:
-    csv_path = dataset_path if dataset_path.is_file() else dataset_path / "slice_localization_data.csv"
-    if not csv_path.is_file():
-        return False
-    with csv_path.open("r", encoding="utf-8") as file:
-        header = file.readline().strip().split(",")
-    return (
-        len(header) == 386
-        and header[0] == "patientId"
-        and header[1] == "value0"
-        and header[-2] == "value383"
-        and header[-1] == "reference"
-    )
-
-
-def _is_teacher_2048x1_dataset(dataset_path: Path) -> bool:
-    data_path = dataset_path if dataset_path.is_file() else dataset_path / "data.npz"
-    return (
-        data_path.is_file()
-        and data_path.name == "data.npz"
-        and data_path.parent.name == "2048x1"
-    )
-
-
-def _compute_split_counts(total: int, test_split: float) -> Tuple[int, int]:
-    if total <= 1:
-        return total, 0
-    n_test = int(round(total * test_split))
-    n_test = max(1, min(total - 1, n_test))
-    return total - n_test, n_test
-
-
 def _load_evaluation_inputs(simulation_info: Dict[str, Any]) -> np.ndarray:
     training_info = simulation_info.get("training", {})
     training_data = training_info.get("training_data", {})
@@ -216,64 +91,8 @@ def _load_evaluation_inputs(simulation_info: Dict[str, Any]) -> np.ndarray:
         raise ValueError("simulation_config.yaml is missing training.training_data.task.")
 
     test_split = float(training_data.get("test_split", 0.2))
-    dataset_path = resolve_dataset_path(task_path)
-
-    if _is_yearpredictionmsd_dataset(dataset_path):
-        _, _, x_test, _ = load_yearpredictionmsd(dataset_path)
-    elif _is_california_housing_prices_dataset(dataset_path):
-        _, _, x_test, _ = load_california_housing_prices(
-            dataset_path,
-            test_split=test_split,
-            seed=0,
-        )
-    elif _is_ct_slice_localization_dataset(dataset_path):
-        _, _, x_test, _ = load_ct_slice_localization(
-            dataset_path,
-            test_split=test_split,
-            seed=0,
-        )
-    elif _is_drybean_dataset(dataset_path):
-        _, _, x_test, _ = load_drybean(
-            dataset_path,
-            test_split=test_split,
-            seed=0,
-            one_hot=True,
-        )
-    elif _is_classification_dataset(dataset_path):
-        _, _, x_test, _ = load_classification_dataset(dataset_path, one_hot=True)
-    elif _is_winequality_dataset(dataset_path):
-        _, _, x_test, _ = load_winequality(
-            dataset_path,
-            test_split=test_split,
-            seed=0,
-            one_hot=True,
-        )
-    elif _is_mnist_dataset(dataset_path):
-        _, _, x_test, _ = load_mnist(dataset_path)
-    elif _is_emnist_byclass_dataset(dataset_path):
-        _, _, x_test, _ = load_emnist_byclass(dataset_path)
-    elif _is_svhn_dataset(dataset_path):
-        _, _, x_test, _ = load_svhn(dataset_path)
-    elif _is_cifar10_dataset(dataset_path):
-        _, _, x_test, _ = load_all_cifar10_data(dataset_path)
-    elif _is_teacher_2048x1_dataset(dataset_path):
-        _, _, x_test, _ = load_teacher_2048x1_dataset(
-            dataset_path,
-            test_split=test_split,
-            seed=0,
-        )
-    else:
-        inputs, _ = load_teacher_dataset(dataset_path)
-        inputs = inputs.reshape(inputs.shape[0], -1).astype(np.float32)
-        _, n_test = _compute_split_counts(inputs.shape[0], test_split)
-        rng = np.random.default_rng(seed=0)
-        permutation = rng.permutation(inputs.shape[0])
-        x_test = inputs[permutation[:n_test]]
-        print(
-            "Warning: generic teacher-data runs used an unseeded train/test split during "
-            "training. Reconstructing the evaluation inputs with seed 0 for Dense_0 "
-            "activation-delta plotting."
-        )
+    # Datasets without a predefined split are split with seed 0 during training as well.
+    _, _, x_test, _, _ = load_dataset(task_path, test_split, rng=np.random.default_rng(seed=0))
 
     x_test = np.asarray(x_test, dtype=np.float32)
     if x_test.ndim > 2:
@@ -313,6 +132,13 @@ def _width_key(label: str) -> Sequence[int]:
 
     fallback = [int(match) for match in re.findall(r"\d+", label)]
     return fallback if fallback else [10**9]
+
+
+def _hidden_width_label(label: str) -> str:
+    widths = _width_key(label)
+    if widths and widths[0] != 10**9:
+        return str(widths[0])
+    return label
 
 
 def _extract_layer_activations(log_path: Path) -> np.ndarray:
@@ -410,8 +236,11 @@ def _dense0_delta_saved_indices(
     ]
 
 
+FIGURE_DIR = Path("figures/analyze_acts")
+
+
 def _plot_file_path(log_dir: Path, outfile: Path | None, suffix: str | None = None) -> Path:
-    prefix = Path("figures_analyze_acts")
+    prefix = FIGURE_DIR
     if outfile:
         output = Path(outfile)
         if suffix:
@@ -758,7 +587,7 @@ def plot_dense0_activation_deltas(
                     else series.postactivation_deltas[series_delta_index]
                 )
                 color = colors[(series.scheme, series.label)]
-                label = series.label if delta_index == 0 and row_index == 0 else None
+                label = _hidden_width_label(series.label) if delta_index == 0 and row_index == 0 else None
                 handle = _plot_positive_point(ax, series.width, float(value), color, label)
                 if handle is not None and label is not None:
                     legend_entries[series.scheme].append((handle, label))
@@ -794,7 +623,7 @@ def plot_dense0_activation_deltas(
 
     combined_handles, combined_labels, header_indices = _build_combined_legend(
         legend_entries,
-        {"standard": "Standard parametrization", "muP": "muP parametrization"},
+        {"standard": "width (n) - SP", "muP": r"width (n) - $\mu$P"},
     )
     if combined_handles:
         legend = fig.legend(
@@ -836,7 +665,7 @@ def plot_layer_activations(
     if not histories:
         raise ValueError(f"No activation histories available in {log_dir}")
     
-    simluation_config_path = collect_files_with_ending(log_dir.parent, "simulation_config.yaml")[0]
+    simluation_config_path = sorted(collect_files_with_ending(log_dir, "simulation_config.yaml"))[0]
     simulation_info = load_yaml_as_dict(simluation_config_path)
     dataset_info = simulation_info["training"]
     network_info = simulation_info["network"]
@@ -936,22 +765,29 @@ def plot_layer_activations(
 
 
 def main() -> None:
+    global FIGURE_DIR
     parser = argparse.ArgumentParser(
         description=(
-            "Visualize layer activation averages across widths for each epoch. "
-            "By default, reads logs from experiments/experiment1/logs/run_analyze_actications."
+            "Visualize layer activation averages across widths (thesis Fig. 3.1: changes of the "
+            "hidden-layer pre-/postactivations between saved training steps)."
         )
     )
     parser.add_argument(
         "--log-dir",
         type=Path,
-        default=Path("experiments/experiment1/logs/run_analyze_actications"),
-        help="Directory containing subfolders with training_log.json files.",
+        required=True,
+        help="Job directory containing scheme-*_widths-* run folders with training_log.json files.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=FIGURE_DIR,
+        help="Directory in which the figures are saved (default: figures/analyze_acts).",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        help="Optional path to save the generated plot image.",
+        help="Optional file name of the generated plot (relative to --output-dir).",
     )
     parser.add_argument(
         "--dense0-delta-y-exp-limits",
@@ -965,6 +801,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    FIGURE_DIR = args.output_dir
     dense0_delta_y_exp_limits = (
         tuple(args.dense0_delta_y_exp_limits)
         if args.dense0_delta_y_exp_limits is not None

@@ -6,14 +6,12 @@ from omegaconf import OmegaConf
 from main import run_experiment
 
 
-def assemble(config_path):
-    # Initialize Hydra manually
-    root = Path(__file__).parent.parent
+def assemble(config_path: Path) -> dict:
+    """Compose a width config with its master_config.yaml via Hydra and resolve it."""
+    config_dir = config_path.resolve().parent
     name = config_path.name
-    path = config_path.parent
-    dir = root.joinpath(path)
-    
-    with initialize_config_dir(config_dir=str(dir), version_base=None):
+
+    with initialize_config_dir(config_dir=str(config_dir), version_base=None):
         cfg = compose(config_name=name)
         resolved = OmegaConf.to_container(cfg, resolve=True)
         if isinstance(resolved, dict):
@@ -29,11 +27,8 @@ def run_experiments(input_path: Path, output_path: Path = None) -> int:
     print(f"\nRunning training for {input_path.name}") 
     
     if str(input_path).endswith(".yaml"):
-        if not output_path:
-            output_dir = Path("./logs") 
-        else:
-            output_dir = output_path
-        config = assemble(input_path)
+        output_dir = output_path or Path("./logs")
+        run_experiment(assemble(input_path), output_dir)
 
     else:
         configs = input_path.joinpath("configs")
@@ -47,15 +42,21 @@ def run_experiments(input_path: Path, output_path: Path = None) -> int:
             output_dir = input_path.joinpath(f"logs/run_{timestamp}")
 
         for path in config_files:
-            config = assemble(path)
-    
-    run_experiment(config, output_dir)
+            print(f"\nRunning training for {path.name}")
+            run_experiment(assemble(path), output_dir)
+    return 0
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Parser to run experiments from command line.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Train the networks of an experiment. --path is either a single width config "
+            "(e.g. experiments/cifar10/mup/configs/mup_config1.yaml) or an experiment directory "
+            "containing a configs/ folder, in which case all configs are trained sequentially."
+        )
+    )
 
-    parser.add_argument("--path", type=Path, help="Path for the experiment config files", required=True)
+    parser.add_argument("--path", type=Path, help="Config file or experiment directory", required=True)
     parser.add_argument("--output_dir", type=Path, default=None, help="Directory to store run outputs.")
 
     args = parser.parse_args()

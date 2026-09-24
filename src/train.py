@@ -1,0 +1,504 @@
+# train.py
+from typing import Dict, Any, Callable, Optional
+from pathlib import Path
+
+import numpy as np
+import jax
+import jax.numpy as jnp
+import optax
+from flax.traverse_util import flatten_dict
+import zarr
+
+from utils import (
+    mse_loss,
+    cross_entropy_loss,
+    create_state,
+    load_teacher_dataset,
+    load_teacher_2048x1_dataset,
+    load_all_cifar10_data,
+    load_mnist,
+    load_emnist_byclass,
+    load_svhn,
+    load_winequality,
+    load_drybean,
+    load_classification_dataset,
+    load_california_housing_prices,
+    load_ct_slice_localization,
+    load_yearpredictionmsd,
+    resolve_dataset_path,
+)
+
+
+def make_train_step(loss_fn):
+    @jax.jit
+    def train_step(state, xb, yb):
+        grads = jax.grad(loss_fn)(state.params, state.apply_fn, xb, yb)
+        updates, new_opt_state = state.tx.update(grads, state.opt_state, state.params)
+        new_params = optax.apply_updates(state.params, updates)
+        return state.replace(params=new_params, opt_state=new_opt_state, step=state.step + 1)
+    return train_step
+
+def make_loss_saver(loss_fn):
+    def save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, train_step, total_train_steps, progress=None):
+        train_loss = loss_fn(state.params, state.apply_fn, xtr_full, ytr_full)
+        test_loss, layer_activations, first_layer_term_matrix = loss_fn(
+            state.params,
+            state.apply_fn,
+            xte_full,
+            yte_full,
+            return_layer_act=True,
+        )
+        
+        history["train_loss"].append(float(train_loss))
+        history["test_loss"].append(float(test_loss))
+        history["layer_activations"].append(layer_activations.tolist())
+
+        if progress is not None:
+            progress(
+                epoch=int(train_step),
+                total=int(total_train_steps),
+                train_loss=float(train_loss),
+                test_loss=float(test_loss),
+            )
+        return first_layer_term_matrix
+    return save_losses
+
+def _create_tree_datasets(root, tree, total_steps, sep="/", dtype=None, time_chunk=64):
+    flat = flatten_dict(tree, sep=sep)
+
+    for k, v in flat.items():
+        v0 = np.array(jax.device_get(v))
+        dt = dtype if dtype is not None else v0.dtype
+
+        root.create_dataset(
+            name=k,
+            shape=(total_steps,) + v0.shape,
+            chunks=(min(time_chunk, total_steps),) + v0.shape,
+            dtype=dt,
+        )
+    return list(flat.keys())
+
+def init_weight_store(zarr_path, params, total_steps, sep="/", dtype=None, time_chunk=64):
+    root = zarr.open_group(zarr_path, mode="w")
+    root.attrs["total_steps"] = int(total_steps)
+    root.attrs["param_keys"] = _create_tree_datasets(
+        root,
+        params,
+        total_steps,
+        sep=sep,
+        dtype=dtype,
+        time_chunk=time_chunk,
+    )
+    return root
+
+def init_term_store(root, total_steps, term_shape, sep="/", time_chunk=64):
+    term_tree = {"logits": np.zeros(term_shape, dtype=np.float32)}
+    root.attrs["term_keys"] = _create_tree_datasets(
+        root,
+        term_tree,
+        total_steps,
+        sep=sep,
+        dtype=np.float32,
+        time_chunk=time_chunk,
+    )
+
+def append_tree(root, tree, step, sep="/", cast_dtype=None):
+    flat = flatten_dict(tree, sep=sep)
+
+    for k, v in flat.items():
+        arr = np.array(jax.device_get(v))
+        if cast_dtype is not None:
+            arr = arr.astype(cast_dtype)
+        root[k][int(step), ...] = arr
+
+def append_params(root, params, step, sep="/", cast_dtype=None):
+    append_tree(root, params, step, sep=sep, cast_dtype=cast_dtype)
+
+def append_first_layer_terms(root, term_matrix, step, sep="/", cast_dtype=None):
+    append_tree(
+        root,
+        {"logits": term_matrix},
+        step,
+        sep=sep,
+        cast_dtype=cast_dtype,
+    )
+
+def _is_cifar10_dataset(dataset_path: Path) -> bool:
+    return (
+        dataset_path.is_dir()
+        and (dataset_path / "data_batch_1").is_file()
+        and (dataset_path / "test_batch").is_file()
+    )
+
+def _is_mnist_dataset(dataset_path: Path) -> bool:
+    return (
+        dataset_path.is_dir()
+        and (dataset_path / "train-images-idx3-ubyte").is_file()
+        and (dataset_path / "train-labels-idx1-ubyte").is_file()
+        and (dataset_path / "t10k-images-idx3-ubyte").is_file()
+        and (dataset_path / "t10k-labels-idx1-ubyte").is_file()
+    )
+
+def _is_emnist_byclass_dataset(dataset_path: Path) -> bool:
+    base_dir = dataset_path / "byclass" if (dataset_path / "byclass").is_dir() else dataset_path
+    return (
+        base_dir.is_dir()
+        and (base_dir / "emnist-byclass-train-images-idx3-ubyte").is_file()
+        and (base_dir / "emnist-byclass-train-labels-idx1-ubyte").is_file()
+        and (base_dir / "emnist-byclass-test-images-idx3-ubyte").is_file()
+        and (base_dir / "emnist-byclass-test-labels-idx1-ubyte").is_file()
+    )
+
+def _is_svhn_dataset(dataset_path: Path) -> bool:
+    return (
+        dataset_path.is_dir()
+        and (dataset_path / "train_32x32.mat").is_file()
+        and (dataset_path / "test_32x32.mat").is_file()
+    )
+
+def _is_winequality_dataset(dataset_path: Path) -> bool:
+    if dataset_path.is_file():
+        return dataset_path.suffix.lower() == ".csv" and dataset_path.name.startswith("winequality-")
+    return (
+        dataset_path.is_dir()
+        and any(
+            (dataset_path / filename).is_file()
+            for filename in ("winequality-red.csv", "winequality-white.csv")
+        )
+    )
+
+def _is_drybean_dataset(dataset_path: Path) -> bool:
+    if dataset_path.is_file():
+        return dataset_path.suffix.lower() == ".arff" and dataset_path.name == "Dry_Bean_Dataset.arff"
+    return dataset_path.is_dir() and (dataset_path / "Dry_Bean_Dataset.arff").is_file()
+
+def _is_classification_dataset(dataset_path: Path) -> bool:
+    data_path = dataset_path if dataset_path.is_file() else dataset_path / "data.npz"
+    if not data_path.is_file():
+        return False
+    with np.load(data_path) as data:
+        return {"inputs", "outputs", "train_idx", "test_idx"} <= set(data.files)
+
+def _is_yearpredictionmsd_dataset(dataset_path: Path) -> bool:
+    if dataset_path.is_file():
+        return dataset_path.name == "YearPredictionMSD.txt"
+    return dataset_path.is_dir() and (dataset_path / "YearPredictionMSD.txt").is_file()
+
+def _is_california_housing_prices_dataset(dataset_path: Path) -> bool:
+    csv_path = dataset_path if dataset_path.is_file() else dataset_path / "housing.csv"
+    if not csv_path.is_file():
+        return False
+
+    required_columns = {
+        "longitude",
+        "latitude",
+        "housing_median_age",
+        "total_rooms",
+        "total_bedrooms",
+        "population",
+        "households",
+        "median_income",
+        "median_house_value",
+        "ocean_proximity",
+    }
+    with csv_path.open("r", encoding="utf-8") as file:
+        header = file.readline().strip().split(",")
+    return required_columns <= set(header)
+
+def _is_ct_slice_localization_dataset(dataset_path: Path) -> bool:
+    csv_path = dataset_path if dataset_path.is_file() else dataset_path / "slice_localization_data.csv"
+    if not csv_path.is_file():
+        return False
+
+    with csv_path.open("r", encoding="utf-8") as file:
+        header = file.readline().strip().split(",")
+    return (
+        len(header) == 386
+        and header[0] == "patientId"
+        and header[1] == "value0"
+        and header[-2] == "value383"
+        and header[-1] == "reference"
+    )
+
+def _is_teacher_2048x1_dataset(dataset_path: Path) -> bool:
+    data_path = dataset_path if dataset_path.is_file() else dataset_path / "data.npz"
+    return (
+        data_path.is_file()
+        and data_path.name == "data.npz"
+        and data_path.parent.name == "2048x1"
+    )
+
+
+def run_once(
+    cfg,
+    run_dir: Path,
+    progress: Optional[Callable[..., None]] = None,
+) -> Dict[str, Any]:
+    
+    test_split = float(cfg.test_split)
+
+    def compute_split_counts(total: int) -> tuple[int, int]:
+        if total <= 1:
+            return total, 0
+        n_test = int(round(total * test_split))
+        n_test = max(1, min(total - 1, n_test))
+        n_train = total - n_test
+        return n_train, n_test
+
+    rng_source = np.random.default_rng()
+    dataset_path = resolve_dataset_path(cfg.task)
+
+    if _is_yearpredictionmsd_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_yearpredictionmsd(dataset_path)
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+        test_split = float(xte.shape[0] / total_samples)
+    elif _is_california_housing_prices_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_california_housing_prices(
+            dataset_path,
+            test_split=test_split,
+            seed=0,
+        )
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    elif _is_ct_slice_localization_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_ct_slice_localization(
+            dataset_path,
+            test_split=test_split,
+            seed=0,
+        )
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    elif _is_drybean_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_drybean(
+            dataset_path,
+            test_split=test_split,
+            seed=0,
+            one_hot=True,
+        )
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    elif _is_classification_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_classification_dataset(dataset_path, one_hot=True)
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+        test_split = float(xte.shape[0] / total_samples)
+    elif _is_winequality_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_winequality(
+            dataset_path,
+            test_split=test_split,
+            seed=0,
+            one_hot=True,
+        )
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    elif _is_mnist_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_mnist(dataset_path)
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    elif _is_emnist_byclass_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_emnist_byclass(dataset_path)
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    elif _is_svhn_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_svhn(dataset_path)
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    elif _is_cifar10_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_all_cifar10_data(dataset_path)
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    elif _is_teacher_2048x1_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_teacher_2048x1_dataset(
+            dataset_path,
+            test_split=test_split,
+            seed=0,
+        )
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    else:
+        inputs, targets = load_teacher_dataset(dataset_path)
+        total_samples = int(inputs.shape[0])
+        n_train, n_test = compute_split_counts(total_samples)
+        permutation = rng_source.permutation(total_samples)
+        test_idx = permutation[:n_test]
+        train_idx = permutation[n_test:]
+        if train_idx.size == 0:
+            train_idx = permutation[:-1]
+            test_idx = permutation[-1:]
+        xtr_np = inputs[train_idx]
+        ytr_np = targets[train_idx]
+        xte = inputs[test_idx]
+        yte = targets[test_idx]
+        if set(train_idx) & set(test_idx):
+            raise ValueError("Train and test sets overlap.")
+  
+
+    xtr_np = np.asarray(xtr_np, dtype=np.float32)
+    ytr_np = np.asarray(ytr_np, dtype=np.float32)
+    xte = np.asarray(xte, dtype=np.float32)
+    yte = np.asarray(yte, dtype=np.float32)
+
+    xtr_full = jnp.asarray(xtr_np)
+    ytr_full = jnp.asarray(ytr_np)
+    xte_full = jnp.asarray(xte)
+    yte_full = jnp.asarray(yte)
+    num_term_vectors = 5
+
+    if xte_full.shape[0] < num_term_vectors:
+        raise ValueError(
+            f"Need at least {num_term_vectors} evaluation samples to save first-layer terms, "
+            f"but found only {xte_full.shape[0]}."
+        )
+
+    init_seed = int(rng_source.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
+    rng = jax.random.key(init_seed)
+    sample_x = xtr_full[: min(8, xtr_full.shape[0])]
+    state, _ = create_state(
+        rng,
+        cfg.widths,
+        cfg.activations,
+        cfg.param_scheme,
+        cfg.lr,
+        cfg.wd,
+        sample_x,
+        cfg.kernel_dimensions,
+        nodes_per_layer=cfg.nodes_per_layer,
+        base_layer_widths=cfg.base_layer_widths,
+        base_kernel_dims=cfg.base_kernel_dimensions
+    )
+
+    history = {"train_loss": [], "test_loss": [], "layer_activations": []}
+    if cfg.batch_seed == 'random':
+        batch_rng = np.random.default_rng()
+    else:
+        batch_rng = np.random.default_rng(seed=cfg.batch_seed)
+    batch_size = cfg.batch_size if cfg.batch_size and cfg.batch_size > 0 else len(xtr_np)
+
+    if cfg.loss_type == "mse":
+        loss_function = mse_loss
+    elif cfg.loss_type == "cross_entropy":
+        loss_function = cross_entropy_loss
+    else:
+        raise ValueError("The loss type specified in the config could not be found")
+    
+    train_step = make_train_step(loss_function)
+    save_losses = make_loss_saver(loss_function)
+
+    steps_per_epoch = 1 if batch_size >= len(xtr_np) else len(xtr_np) // batch_size
+    total_steps = cfg.epochs * steps_per_epoch
+    if isinstance(cfg.save_loss_frequency, str):
+        total_steps_saved = cfg.epochs
+    else:
+        total_steps_saved = int(total_steps / cfg.save_loss_frequency)
+
+    weight_root = None
+    if cfg.weight_monitoring:
+        weight_root = init_weight_store(run_dir / "weights.zarr", state.params, total_steps_saved + 1)
+        term_shape = (
+            (num_term_vectors, cfg.widths[0])
+            if cfg.widths[-1] == 1
+            else (num_term_vectors, cfg.widths[0], cfg.widths[-1])
+        )
+        init_term_store(weight_root, total_steps_saved + 1, term_shape)
+    # weight_update_cov_root = init_weight_store(run_dir / "weights_cov_samples.zarr", state.params, (total_steps_saved + 1) * cfg.weight_update_covariance_samples)
+
+    save_step_counter = 0
+    if weight_root is not None:
+        append_params(weight_root, state.params, save_step_counter, cast_dtype=np.float16)
+        _, _, initial_first_layer_term_matrix = loss_function(
+            state.params,
+            state.apply_fn,
+            xte_full,
+            yte_full,
+            return_layer_act=True,
+        )
+        append_first_layer_terms(weight_root, initial_first_layer_term_matrix, save_step_counter)
+
+    for epoch in range(cfg.epochs):
+        indices = batch_rng.permutation(len(xtr_np))
+
+        if batch_size >= len(xtr_np):
+            print("Using full-batch training.")
+            xb = jnp.asarray(xtr_np[indices])
+            yb = jnp.asarray(ytr_np[indices])
+            state = train_step(state, xb, yb)
+            should_save = True if cfg.save_loss_frequency == "epoch" else (
+                isinstance(cfg.save_loss_frequency, int)
+                and state.step % cfg.save_loss_frequency == 0
+            )
+            if should_save:
+                save_step_counter += 1
+                first_layer_term_matrix = save_losses(
+                    history,
+                    state,
+                    xtr_full,
+                    ytr_full,
+                    xte_full,
+                    yte_full,
+                    save_step_counter,
+                    total_steps_saved,
+                    progress,
+                )
+                if weight_root is not None:
+                    append_params(weight_root, state.params, save_step_counter, cast_dtype=np.float16)
+                    append_first_layer_terms(weight_root, first_layer_term_matrix, save_step_counter)
+
+        else:
+            for start in range(0, len(indices) - batch_size + 1, batch_size):
+                batch_idx = indices[start:start + batch_size]
+                xb = jnp.asarray(xtr_np[batch_idx])
+                yb = jnp.asarray(ytr_np[batch_idx])
+                state = train_step(state, xb, yb)
+                # if cfg.weight_update_covariance_samples is not None:
+                #     for i in range(cfg.weight_update_covariance_samples):
+                #         cov_sample_batch = batch_rng.choice(len(xtr_np), size=batch_size, replace=False)
+                #         cov_xb = jnp.asarray(xtr_np[cov_sample_batch])
+                #         cov_yb = jnp.asarray(ytr_np[cov_sample_batch])
+                #         weight_update_cov_step = train_step(state, cov_xb, cov_yb)
+
+                if cfg.save_loss_frequency == "epoch":
+                    continue
+                elif isinstance(cfg.save_loss_frequency, int):
+                    if state.step % cfg.save_loss_frequency == 0:
+                        save_step_counter += 1
+                        first_layer_term_matrix = save_losses(
+                            history,
+                            state,
+                            xtr_full,
+                            ytr_full,
+                            xte_full,
+                            yte_full,
+                            save_step_counter,
+                            total_steps_saved,
+                            progress,
+                        )
+                        if weight_root is not None:
+                            append_params(weight_root, state.params, save_step_counter, cast_dtype=np.float16)
+                            append_first_layer_terms(weight_root, first_layer_term_matrix, save_step_counter)
+ 
+                else: 
+                    raise ValueError("Invalid save_loss_frequency value. Please provide an integer or 'epoch'.")
+               
+        if cfg.save_loss_frequency == "epoch":
+            save_step_counter += 1
+            first_layer_term_matrix = save_losses(
+                history,
+                state,
+                xtr_full,
+                ytr_full,
+                xte_full,
+                yte_full,
+                save_step_counter,
+                total_steps_saved,
+                progress,
+            )
+            if weight_root is not None:
+                append_params(weight_root, state.params, save_step_counter, cast_dtype=np.float16)
+                append_first_layer_terms(weight_root, first_layer_term_matrix, save_step_counter)
+
+    final_params = jax.device_get(state.params)
+
+    dataset_info = {
+        "total": int(total_samples),
+        "n_train": int(xtr_np.shape[0]),
+        "n_test": int(xte_full.shape[0]),
+        "test_split": float(test_split),
+    }
+
+    return {
+        "final_train_loss": history["train_loss"][-1],
+        "final_test_loss": history["test_loss"][-1],
+        "history": history,
+        "final_params": final_params,
+        "dataset_info": dataset_info,
+    }

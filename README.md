@@ -28,6 +28,7 @@ contains everything needed to
 - [Figure overview](#figure-overview)
 - [Experiment configuration](#experiment-configuration)
 - [Output of a training run](#output-of-a-training-run)
+- [Getting started with µP](#getting-started-with-µp)
 - [Citation](#citation)
 
 ## Repository structure
@@ -43,7 +44,7 @@ contains everything needed to
 │   ├── mlp.py                             Flax MLP with parametrization-aware initialization
 │   ├── param_schemes.py                   abc-parametrizations: SP ("standard") and µP ("muP")
 │   ├── config.py                          config dataclass
-│   ├── data.py                            dataset loaders (CIFAR-10, SVHN, MNIST, UCI, ...)
+│   ├── data.py                            dataset loaders (CIFAR-10, SVHN)
 │   └── utils.py                           losses, optimizer with per-layer learning rates, state
 ├── datasets/
 │   └── download.py                      downloads CIFAR-10 and SVHN into datasets/
@@ -274,7 +275,6 @@ simulation_parameters:
     lr: 0.005
     wd: 0.0
     task: datasets/cifar-10-batches-py              # dataset folder
-    test_split: 0.2                                 # only for datasets without predefined split
     batch_size: 512
     batch_seed: 0                                   # fixed batch order ('random' to reshuffle)
     epochs: 250
@@ -298,12 +298,20 @@ simulation_parameters:
 ```
 
 Width configs may also override individual training settings by replacing
-`training: ${_master...}` with an explicit `training:` block (e.g. a width-dependent `lr`). To create a new experiment, copy one of the folders in `experiments/` and edit the
-configs. The parametrizations are defined in [`src/param_schemes.py`](src/param_schemes.py)
-(the `a`, `b`, `c` exponents of Table 3.1 in the thesis). Besides CIFAR-10 and SVHN,
-[`src/data.py`](src/data.py) also supports MNIST, EMNIST, several UCI datasets and synthetic
-teacher datasets, provided the folder contains a `dataset_overview.yaml` with the input and
-output dimension.
+`training: ${_master...}` with an explicit `training:` block (e.g. a width-dependent `lr`).
+To create a new experiment, copy one of the folders in `experiments/` and edit the configs.
+The parametrizations are defined in [`src/param_schemes.py`](src/param_schemes.py)
+(the `a`, `b`, `c` exponents of Table 3.1 in the thesis).
+
+### Further datasets
+
+[`src/data.py`](src/data.py) ships loaders for CIFAR-10 and SVHN, the datasets used in the thesis.
+Further benchmark datasets, for example from the
+[UCI Machine Learning Repository](https://archive.ics.uci.edu), can be added with a loader that
+returns `(x_train, y_train, x_test, y_test)`, a detection function and a branch in
+`load_dataset` (see the module docstring). The dataset folder below `datasets/` also needs a
+`dataset_overview.yaml` with the input and output dimension, as written by
+[`datasets/download.py`](datasets/download.py).
 
 ## Output of a training run
 
@@ -315,6 +323,22 @@ Each trained network writes a folder `<experiment>/logs/<job>/scheme-<muP|standa
 | `training_log.json` | train/test loss and mean layer activations at every saved step (`final_metrics.history`), final parameters |
 | `weights.zarr/` | weight matrices `Dense_0/kernel`, `Dense_1/kernel` at initialization and every `save_loss_frequency` steps (float16), plus first-layer terms for 5 test inputs (`logits`) |
 | `weight_metrics/<layer>.json` | written by `training_analysis/compute_metrics.py`: squared update norms between saved steps, cosine similarities, path lengths |
+
+## Getting started with µP
+
+The maximal-update parametrization and the infinite-width analysis used in the thesis originate
+from the Tensor Programs series by Greg Yang and collaborators. Good entry points are:
+
+- [microsoft/mup](https://github.com/microsoft/mup): the reference implementation of µP for
+  PyTorch, with an introduction to µP and µTransfer (hyperparameter transfer across widths).
+- The Tensor Programs series:
+  - G. Yang, *Tensor Programs I: Wide Feedforward or Recurrent Neural Networks of Any Architecture are Gaussian Processes*, [arXiv:1910.12478](https://arxiv.org/abs/1910.12478)
+  - G. Yang, *Tensor Programs II: Neural Tangent Kernel for Any Architecture*, [arXiv:2006.14548](https://arxiv.org/abs/2006.14548)
+  - G. Yang, *Tensor Programs III: Neural Matrix Laws*, [arXiv:2009.10685](https://arxiv.org/abs/2009.10685)
+  - G. Yang, E. J. Hu, *Tensor Programs IV: Feature Learning in Infinite-Width Neural Networks*, [arXiv:2011.14522](https://arxiv.org/abs/2011.14522): introduces the abc-parametrizations and µP
+  - G. Yang, E. J. Hu, I. Babuschkin, S. Sidor, X. Liu, D. Farhi, N. Ryder, J. Pachocki, W. Chen, J. Gao, *Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer*, [arXiv:2203.03466](https://arxiv.org/abs/2203.03466)
+  - G. Yang, E. Littwin, *Tensor Programs IVb: Adaptive Optimization in the Infinite-Width Limit*, [arXiv:2308.01814](https://arxiv.org/abs/2308.01814)
+  - G. Yang, D. Yu, C. Zhu, S. Hayou, *Tensor Programs VI: Feature Learning in Infinite-Depth Neural Networks*, [arXiv:2310.02244](https://arxiv.org/abs/2310.02244)
 
 ## Citation
 

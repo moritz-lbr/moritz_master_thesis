@@ -118,7 +118,7 @@ def run_once(
 ) -> Dict[str, Any]:
     
     rng_source = np.random.default_rng()
-    xtr_np, ytr_np, xte, yte, test_split = load_dataset(cfg.task, cfg.test_split, rng_source)
+    xtr_np, ytr_np, xte, yte, test_split = load_dataset(cfg.task)
     total_samples = int(xtr_np.shape[0] + xte.shape[0])
 
     xtr_np = np.asarray(xtr_np, dtype=np.float32)

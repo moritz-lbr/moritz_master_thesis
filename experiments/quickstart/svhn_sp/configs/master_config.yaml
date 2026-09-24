@@ -16,7 +16,6 @@ simulation_parameters:
     lr: 0.01
     wd: 0.0
     task: datasets/svhn   # dataset folder, see datasets/download.py
-    test_split: 0.2     # only used for datasets without a predefined test split
     batch_size: 512
     batch_seed: 0       # Seed that fixes the order of the mini-batches (identical for all widths). Use 'random' to shuffle randomly at each epoch
     epochs: 6          # Number of full passes through the training data

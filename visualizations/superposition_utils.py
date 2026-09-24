@@ -513,14 +513,11 @@ def load_reconstruction_eval_data(
         raise ValueError(f"Missing training_data.task in {run_dir / 'simulation_config.yaml'}")
 
     dataset_path = data.resolve_dataset_path(task)
-    test_split = float(training_data.get("test_split", training.get("test_split", 0.2)))
-    cache_key = (str(dataset_path), "seed0", test_split)
+    cache_key = (str(dataset_path), "predefined_split", 0.0)
     if cache_key in cache:
         return cache[cache_key]
 
-    _, _, x_test, y_test, _ = data.load_dataset(
-        dataset_path, test_split, rng=np.random.default_rng(seed=0)
-    )
+    _, _, x_test, y_test, _ = data.load_dataset(dataset_path)
     result = (np.asarray(x_test, dtype=np.float32), np.asarray(y_test, dtype=np.float32))
     cache[cache_key] = result
     return result

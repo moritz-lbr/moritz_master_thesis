@@ -17,7 +17,6 @@ class Config:
     batch_size: int
     batch_seed: Any
     task: str
-    test_split: float
     save_loss_frequency: Any
     weight_monitoring: bool
     loss_type: str

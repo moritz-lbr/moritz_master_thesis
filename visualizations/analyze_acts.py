@@ -90,9 +90,7 @@ def _load_evaluation_inputs(simulation_info: Dict[str, Any]) -> np.ndarray:
     if task_path is None:
         raise ValueError("simulation_config.yaml is missing training.training_data.task.")
 
-    test_split = float(training_data.get("test_split", 0.2))
-    # Datasets without a predefined split are split with seed 0 during training as well.
-    _, _, x_test, _, _ = load_dataset(task_path, test_split, rng=np.random.default_rng(seed=0))
+    _, _, x_test, _, _ = load_dataset(task_path)
 
     x_test = np.asarray(x_test, dtype=np.float32)
     if x_test.ndim > 2:

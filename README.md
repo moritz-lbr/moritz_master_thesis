@@ -113,7 +113,7 @@ The quickstart trains one-hidden-layer MLPs of width `n = 128, 256, 512` under �
 CIFAR-10 and SVHN (a few epochs each) and runs the complete analysis pipeline on them:
 
 ```bash
-pixi run quickstart            # CIFAR-10 and SVHN (~40 min on a CPU)
+pixi run quickstart            # CIFAR-10 and SVHN (~30 min on a CPU, plus the download)
 pixi run quickstart cifar10    # CIFAR-10 only
 ```
 
@@ -177,9 +177,11 @@ batch order (`batch_seed: 0`) shared by all widths, losses and weights saved eve
 | `experiments/cifar10/sp`  | SP | η = 0.005 | 250 |
 | `experiments/svhn/{mup,sp}` | µP / SP | η = 0.01 | 500 |
 
-The thesis runs were trained on NVIDIA A40 GPUs with one SLURM array task per width:
+The thesis runs were trained on NVIDIA A40 GPUs with one SLURM array task per width. Install the
+GPU environment once before submitting (otherwise all array tasks try to install it simultaneously):
 
 ```bash
+pixi install -e gpu
 bash slurm/submit_training.sh experiments/cifar10/mup     # -> experiments/cifar10/mup/logs/job-<id>/
 bash slurm/submit_training.sh experiments/cifar10/sp      # -> experiments/cifar10/sp/logs/job-<id>/
 ```

@@ -11,7 +11,7 @@
 #      -> experiments/quickstart/<ds>_{mup,sp}/logs/job-quickstart/
 #   3. runs the full analysis pipeline                        (scripts/make_figures.sh)
 #      -> figures/quickstart/<ds>/
-# On a CPU the whole quickstart takes roughly 30-40 minutes.
+# On a CPU training and analysis take roughly 30 minutes (plus the dataset download).
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

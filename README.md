@@ -338,4 +338,3 @@ from the Tensor Programs series by Greg Yang and collaborators. Good entry point
   - G. Yang, E. J. Hu, I. Babuschkin, S. Sidor, X. Liu, D. Farhi, N. Ryder, J. Pachocki, W. Chen, J. Gao, *Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer*, [arXiv:2203.03466](https://arxiv.org/abs/2203.03466)
   - G. Yang, E. Littwin, *Tensor Programs IVb: Adaptive Optimization in the Infinite-Width Limit*, [arXiv:2308.01814](https://arxiv.org/abs/2308.01814)
   - G. Yang, D. Yu, C. Zhu, S. Hayou, *Tensor Programs VI: Feature Learning in Infinite-Depth Neural Networks*, [arXiv:2310.02244](https://arxiv.org/abs/2310.02244)
-```
